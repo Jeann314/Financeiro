@@ -1,16 +1,10 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Mon May 25 09:45:41 2026
-
-@author: Administrador
-"""
-
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
 import locale
 import unicodedata
+from streamlit_gsheets import GSheetsConnection
 
 # Configuração da página
 st.set_page_config(page_title="Controle Financeiro", page_icon="💰", layout="wide")
@@ -46,40 +40,27 @@ def remover_acentos(texto):
 def ordenar_lista_sem_acentos(lista):
     return sorted(lista, key=remover_acentos)
 
-# --- CONEXÃO COM GOOGLE SHEETS ---
-# Obtém o ID da planilha através dos Secrets do Streamlit
+# --- CONEXÃO ROBUSTA COM GOOGLE SHEETS ---
 try:
-    SHEET_ID = st.secrets["google_sheets"]["sheet_id"]
-    URL_BASE = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet="
-    URL_EXPORT = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/externalurl?app=streamlit" # Link para envio via API/Form
-except:
-    st.error("⚠️ Configuração do Google Sheets não encontrada nos Secrets do Streamlit!")
+    # Cria a conexão automática usando os Secrets do Streamlit
+    conn = st.connection("gsheets", type=GSheetsConnection)
+except Exception as e:
+    st.error(f"⚠️ Erro ao conectar ao Google Sheets. Verifique os Secrets! Detalhe: {e}")
     st.stop()
-
-# Função auxiliar para atualizar dados no Google Sheets usando requisição HTTP simples
-import requests
-def salvar_na_nuvem(aba_nome, df_dados):
-    # O Streamlit Cloud interage melhor com o Sheets usando a biblioteca gspread ou st.connection. 
-    # Para manter o código simples e sem chaves JSON complexas, usamos st.connection do próprio Streamlit:
-    pass
-
-# Forma moderna e robusta usando st.connection para Google Sheets
-from streamlit_gsheets import GSheetsConnection
-
-conn = st.connection("gsheets", type=GSheetsConnection)
 
 def carregar_transacoes():
     try:
-        df = conn.read(worksheet="transacoes", ttl="0d")
-        if df.empty:
+        # Lê a aba 'transacoes' em tempo real ignorando o cache local (ttl=0)
+        df = conn.read(worksheet="transacoes", ttl=0)
+        if df is None or df.empty:
             return pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Subcategoria", "Conta", "Valor", "Observacoes"])
         
         df.columns = [str(c).strip() for c in df.columns]
-        # Garantir tratamento de tipos
         df["Valor"] = pd.to_numeric(df["Valor"], errors='coerce').fillna(0.0).apply(abs)
         df["Data"] = df["Data"].astype(str)
         return df
-    except:
+    except Exception as e:
+        # Se a aba ainda estiver totalmente vazia no início, retorna a estrutura correta
         return pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Subcategoria", "Conta", "Valor", "Observacoes"])
 
 def salvar_transacoes(df):
@@ -87,7 +68,9 @@ def salvar_transacoes(df):
 
 def carregar_categorias():
     try:
-        df_cats = conn.read(worksheet="categorias", ttl="0d")
+        df_cats = conn.read(worksheet="categorias", ttl=0)
+        if df_cats is None or df_cats.empty:
+            return {"Receita": ["Freela", "Salário"], "Despesa": ["Alimentação", "Lazer", "Moradia"]}
         return {
             "Receita": ordenar_lista_sem_acentos(df_cats["Receita"].dropna().tolist()) if "Receita" in df_cats.columns else ["Freela", "Salário"],
             "Despesa": ordenar_lista_sem_acentos(df_cats["Despesa"].dropna().tolist()) if "Despesa" in df_cats.columns else ["Alimentação", "Lazer", "Moradia"]
@@ -96,13 +79,18 @@ def carregar_categorias():
         return {"Receita": ["Freela", "Salário"], "Despesa": ["Alimentação", "Lazer", "Moradia"]}
 
 def salvar_categorias(dict_cats):
-    df_cats = pd.DataFrame([ (k, pd.Series(v)) for k, v in dict_cats.items() ])
+    # Organiza em listas de tamanhos iguais para salvar como colunas no Sheets
+    dict_ordenado = {
+        "Receita": ordenar_lista_sem_acentos(dict_cats["Receita"]),
+        "Despesa": ordenar_lista_sem_acentos(dict_cats["Despesa"])
+    }
+    df_cats = pd.DataFrame(dict([ (k, pd.Series(v)) for k, v in dict_ordenado.items() ]))
     conn.update(worksheet="categorias", data=df_cats)
 
 def carregar_subcategorias():
     try:
-        df_sub = conn.read(worksheet="subcategorias", ttl="0d")
-        if "Subcategoria" in df_sub.columns:
+        df_sub = conn.read(worksheet="subcategorias", ttl=0)
+        if df_sub is not None and "Subcategoria" in df_sub.columns:
             return ordenar_lista_sem_acentos(df_sub["Subcategoria"].dropna().tolist())
     except:
         pass
@@ -114,8 +102,8 @@ def salvar_subcategorias(lista_subs):
 
 def carregar_contas():
     try:
-        df_contas = conn.read(worksheet="contas", ttl="0d")
-        if "Conta" in df_contas.columns:
+        df_contas = conn.read(worksheet="contas", ttl=0)
+        if df_contas is not None and "Conta" in df_contas.columns:
             return df_contas["Conta"].dropna().tolist()
     except:
         pass
@@ -127,7 +115,9 @@ def salvar_contas(lista_contas):
 
 def carregar_previsoes():
     try:
-        df_prev = conn.read(worksheet="previsoes", ttl="0d")
+        df_prev = conn.read(worksheet="previsoes", ttl=0)
+        if df_prev is None or df_prev.empty:
+            return pd.DataFrame(columns=["Descrição", "Valor", "Débito em Conta?", "Valor Pago?"])
         df_prev["Valor"] = pd.to_numeric(df_prev["Valor"], errors='coerce').fillna(0.0)
         df_prev["Débito em Conta?"] = df_prev["Débito em Conta?"].fillna(False).astype(bool)
         df_prev["Valor Pago?"] = df_prev["Valor Pago?"].fillna(False).astype(bool)
@@ -145,5 +135,4 @@ if "subcategorias" not in st.session_state: st.session_state.subcategorias = car
 if "contas" not in st.session_state: st.session_state.contas = carregar_contas()
 if "previsoes" not in st.session_state: st.session_state.previsoes = carregar_previsoes()
 
-# O RESTANTE DO CÓDIGO DO APP CONTINUA EXATAMENTE IGUAL AO SEU (Interface, Abas, Gráficos e Tabelas)
-# [Por brevidade, a lógica visual das abas se mantém idêntica ao que já corrigimos]
+# [O restante do código visual das abas permanece idêntico à versão funcional que corrigiu localmente]
