@@ -4,9 +4,8 @@ import plotly.express as px
 from datetime import datetime
 import locale
 import unicodedata
-from streamlit_gsheets import GSheetsConnection
 
-# Configuração da página
+# Configuração da página - DEVE SER A PRIMEIRA COISA DO CÓDIGO
 st.set_page_config(page_title="Controle Financeiro", page_icon="💰", layout="wide")
 
 # --- AJUSTE ESTÉTICO: REMOVER ESPAÇO E FIXAR MENU NO TOPO ---
@@ -17,7 +16,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Força o Python a usar a convenção de números e moedas do Brasil/Portugal
+# Força o Python a usar a convenção de números e moedas
 try:
     locale.setlocale(locale.LC_ALL, "pt_BR.UTF-8")
 except:
@@ -42,29 +41,35 @@ def ordenar_lista_sem_acentos(lista):
 
 # --- CONEXÃO ROBUSTA COM GOOGLE SHEETS ---
 try:
-    # Cria a conexão automática usando os Secrets do Streamlit
+    from streamlit_gsheets import GSheetsConnection
     conn = st.connection("gsheets", type=GSheetsConnection)
 except Exception as e:
-    st.error(f"⚠️ Erro ao conectar ao Google Sheets. Verifique os Secrets! Detalhe: {e}")
+    st.error("❌ Erro crítico ao carregar o conector do Google Sheets.")
+    st.info("Certifique-se de que o arquivo 'requirements.txt' contém exatamente a linha: st-gsheets-connection")
+    st.exception(e)
     st.stop()
 
 def carregar_transacoes():
     try:
-        # Lê a aba 'transacoes' em tempo real ignorando o cache local (ttl=0)
         df = conn.read(worksheet="transacoes", ttl=0)
         if df is None or df.empty:
             return pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Subcategoria", "Conta", "Valor", "Observacoes"])
         
         df.columns = [str(c).strip() for c in df.columns]
-        df["Valor"] = pd.to_numeric(df["Valor"], errors='coerce').fillna(0.0).apply(abs)
-        df["Data"] = df["Data"].astype(str)
+        if "Valor" in df.columns:
+            df["Valor"] = pd.to_numeric(df["Valor"], errors='coerce').fillna(0.0).apply(abs)
+        if "Data" in df.columns:
+            df["Data"] = df["Data"].astype(str)
         return df
     except Exception as e:
-        # Se a aba ainda estiver totalmente vazia no início, retorna a estrutura correta
+        # Se der erro ou a aba não existir, evita tela branca e cria o DataFrame vazio
         return pd.DataFrame(columns=["Data", "Tipo", "Categoria", "Subcategoria", "Conta", "Valor", "Observacoes"])
 
 def salvar_transacoes(df):
-    conn.update(worksheet="transacoes", data=df)
+    try:
+        conn.update(worksheet="transacoes", data=df)
+    except Exception as e:
+        st.error(f"Erro ao salvar transações no Google Sheets: {e}")
 
 def carregar_categorias():
     try:
@@ -79,13 +84,15 @@ def carregar_categorias():
         return {"Receita": ["Freela", "Salário"], "Despesa": ["Alimentação", "Lazer", "Moradia"]}
 
 def salvar_categorias(dict_cats):
-    # Organiza em listas de tamanhos iguais para salvar como colunas no Sheets
-    dict_ordenado = {
-        "Receita": ordenar_lista_sem_acentos(dict_cats["Receita"]),
-        "Despesa": ordenar_lista_sem_acentos(dict_cats["Despesa"])
-    }
-    df_cats = pd.DataFrame(dict([ (k, pd.Series(v)) for k, v in dict_ordenado.items() ]))
-    conn.update(worksheet="categorias", data=df_cats)
+    try:
+        dict_ordenado = {
+            "Receita": ordenar_lista_sem_acentos(dict_cats["Receita"]),
+            "Despesa": ordenar_lista_sem_acentos(dict_cats["Despesa"])
+        }
+        df_cats = pd.DataFrame(dict([ (k, pd.Series(v)) for k, v in dict_ordenado.items() ]))
+        conn.update(worksheet="categorias", data=df_cats)
+    except Exception as e:
+        st.error(f"Erro ao salvar categorias: {e}")
 
 def carregar_subcategorias():
     try:
@@ -97,8 +104,11 @@ def carregar_subcategorias():
     return ordenar_lista_sem_acentos(["Combustível", "Supermercado"])
 
 def salvar_subcategorias(lista_subs):
-    df_sub = pd.DataFrame({"Subcategoria": ordenar_lista_sem_acentos(lista_subs)})
-    conn.update(worksheet="subcategorias", data=df_sub)
+    try:
+        df_sub = pd.DataFrame({"Subcategoria": ordenar_lista_sem_acentos(lista_subs)})
+        conn.update(worksheet="subcategorias", data=df_sub)
+    except Exception as e:
+        st.error(f"Erro ao salvar subcategorias: {e}")
 
 def carregar_contas():
     try:
@@ -110,8 +120,11 @@ def carregar_contas():
     return ["Cartão créd. Nubank", "Conta Nubank", "Itaú"]
 
 def salvar_contas(lista_contas):
-    df_contas = pd.DataFrame({"Conta": lista_contas})
-    conn.update(worksheet="contas", data=df_contas)
+    try:
+        df_contas = pd.DataFrame({"Conta": lista_contas})
+        conn.update(worksheet="contas", data=df_contas)
+    except Exception as e:
+        st.error(f"Erro ao salvar contas: {e}")
 
 def carregar_previsoes():
     try:
@@ -126,7 +139,10 @@ def carregar_previsoes():
         return pd.DataFrame(columns=["Descrição", "Valor", "Débito em Conta?", "Valor Pago?"])
 
 def salvar_previsoes(df_prev):
-    conn.update(worksheet="previsoes", data=df_prev)
+    try:
+        conn.update(worksheet="previsoes", data=df_prev)
+    except Exception as e:
+        st.error(f"Erro ao salvar previsões: {e}")
 
 # --- INICIALIZAÇÃO DO ESTADO ---
 if "transacoes" not in st.session_state: st.session_state.transacoes = carregar_transacoes()
@@ -135,4 +151,4 @@ if "subcategorias" not in st.session_state: st.session_state.subcategorias = car
 if "contas" not in st.session_state: st.session_state.contas = carregar_contas()
 if "previsoes" not in st.session_state: st.session_state.previsoes = carregar_previsoes()
 
-# [O restante do código visual das abas permanece idêntico à versão funcional que corrigiu localmente]
+# O restante do código visual das abas continua aqui abaixo...
