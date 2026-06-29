@@ -57,12 +57,10 @@ def ordenar_lista_sem_acentos(lista):
 
 
 # --- CONEXÃO COM O GOOGLE SHEETS ---
-# Centraliza a conexão que lerá as diferentes abas da planilha
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def carregar_aba_sheets(nome_aba, colunas_padrao):
     try:
-        # ttl=5 garante que o app atualize quase em tempo real (cache de 5 segundos)
         df = conn.read(worksheet=nome_aba, ttl=5)
         if df.empty:
             return pd.DataFrame(columns=colunas_padrao)
@@ -85,7 +83,6 @@ def carregar_transacoes():
     if df.empty:
         return df
         
-    # Normalização e tratamento dos dados vindos do Sheets
     mapeamento = {}
     for col in df.columns:
         col_normalizada = col.lower()
@@ -120,6 +117,9 @@ def carregar_transacoes():
         
     df["Data"] = df["Data"].apply(formatar_data_antiga)
     return df[colunas]
+
+def salvar_transacoes(df_transacoes):
+    salvar_aba_sheets(df_transacoes, "transacoes")
 
 def carregar_categorias():
     df_cats = carregar_aba_sheets("categorias", ["Receita", "Despesa"])
@@ -257,7 +257,7 @@ with tab_dash:
                     st.plotly_chart(fig, use_container_width=True)
 
     with sub_tab_cartao:
-        st.header("💳 Controle do Cartão de Crédito")
+        st.header("💳 Outros Controles (Cartão)")
         df_cartao = df[df["Conta"] == "Cartão créd. Nubank"].copy()
         
         if df_cartao.empty:
@@ -552,7 +552,7 @@ with tab_analise:
                 )
                 
             with col_grafico:
-                st.markdown("### 📈 Gráfico de Linha Cronológico")
+                st.markdown("### 📈 Gráfico de Linha Chronológico")
                 df_graf = df_consolidado.copy()
                 df_graf["Período"] = df_graf["AnoMes"].astype(str)
                 
@@ -660,8 +660,8 @@ with tab_analise:
                 
             st.markdown("---")
             st.markdown("### 📊 Gráfico de Barras Mensal por Categoria")
-            df_graf_despesa = df_fluxo_despesa.groupby(["text_auto", "Mês", "Categoria"])["Valor"].sum().reset_index() if "text_auto" in df_fluxo_despesa.columns else df_fluxo_despesa.groupby(["AnoMes", "Mês", "Categoria"])["Valor"].sum().reset_index()
-            df_graf_despesa = df_graf_despesa.sort_values(df_graf_despesa.columns[0])
+            df_graf_despesa = df_fluxo_despesa.groupby(["AnoMes", "Mês", "Categoria"])["Valor"].sum().reset_index()
+            df_graf_despesa = df_graf_despesa.sort_values("AnoMes")
             
             fig_barras_despesa = px.bar(
                 df_graf_despesa,
@@ -997,13 +997,13 @@ with tab_historico:
                     st.session_state.transacoes.at[id_original, "Observacoes"] = nova_obs
                     
                     salvar_transacoes(st.session_state.transacoes)
-                    st.success("Lançamento atualizado com sucesso!")
+                    st.success("Lançamento updated!")
                     st.rerun()
                     
                 if deletar_lancamento:
                     st.session_state.transacoes = st.session_state.transacoes.drop(id_original).reset_index(drop=True)
                     salvar_transacoes(st.session_state.transacoes)
-                    st.success("Lançamento excluído com sucesso!")
+                    st.success("Lançamento deleted!")
                     st.rerun()
                     
         st.markdown("---")
